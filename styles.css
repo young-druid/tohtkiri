@@ -1,0 +1,144 @@
+body {
+  font-family: Tahoma;
+  font-size: 100%;
+  font-size: 1vmax;
+  padding: 0;
+  margin: 0;
+}
+
+body > header, main, body > footer {
+  margin: 0 auto;
+  width: 50%;
+  display: block;
+}
+
+h1 {
+  font-size: 2em;
+}
+
+h2 {
+  font-size: 1.3em;
+}
+
+h3 {
+  font-wight: normal;
+}
+
+time {
+  font-size: 0.8em;
+}
+
+body > header > h1 {
+  text-align: center;
+}
+
+body > header > section {
+  float: right;
+  width: 20%;
+
+}
+
+body > header > section label {
+  float: left;
+}
+
+body > header > section {
+  position: relative;
+}
+
+body > header > section span {
+  display: block;
+  overflow: hidden;
+  padding: 0 8px 0 6px;
+}
+
+body > header > section input[type="text"] {
+  width: 100%;
+  margin-right: 1.2em;
+}
+
+body > header > section input[type="submit"] {
+  border: 0;
+  position: absolute;
+  top: 4px;
+  right: 3px;
+  background-color: transparent;
+  padding: 0;
+  margin: 2px;
+}
+
+main > section {
+  width: 80%;
+  float: left;
+  border-right: 1px solid gray;
+}
+
+main > aside {
+  float: right;
+}
+
+main > aside ul {
+  padding: 0;
+  margin: 0; 
+}
+
+main > aside ul li {
+  list-style-type: none;
+}
+
+main article {
+  margin: 2em 0;
+}
+
+main article > header h2 {
+  margin: 0;
+}
+
+main article > time {
+  margin: 1em 0 0.5em 0;
+}
+
+main article > p {
+  margin: 1em 1em 1em 0;
+}
+
+main .comment {
+  margin-bottom: 1em;
+  padding-left: 1em;
+}
+
+main .comment:hover {
+  border-left: 2px solid gray;
+  margin-left: -2px;
+}
+
+main .comment_body {
+  margin-bottom: 1em;
+}
+
+main .reply_comments {
+  margin-left: 1.3em;
+}
+
+main h3 {
+  display: inline;
+  font-weight: normal;
+}
+
+
+footer {
+  clear: left;
+}
+
+footer > nav {
+  width: 80%;
+}
+
+footer > nav > a:older {
+  float: left;
+}
+
+footer > nav > a.newer {
+  float: right;
+  margin: 0 1em 0 0;  
+}

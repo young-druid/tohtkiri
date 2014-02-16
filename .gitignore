@@ -37,4 +37,9 @@ nosetests.xml
 
 #PyCharm
 .idea
+
+#non-project files
 build.xml
+entries
+indices
+test_server.py
