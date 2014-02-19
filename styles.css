@@ -112,6 +112,39 @@ main .comment:hover {
   margin-left: -2px;
 }
 
+main .comments header {
+  margin: 0.3em 0;
+}
+
+.comments .reply-form > div {
+  padding: 0.2em 1em;
+}
+
+.comments .reply-form input, .comments .reply-form textarea {
+  width:100%;
+  -webkit-box-sizing: border-box;
+  -moz-box-sizing: border-box;
+  -ms-box-sizing: border-box;
+  box-sizing: border-box;
+  border: 2px solid gray;
+  padding: 1px 2px;
+}
+
+.comments .reply-form input {
+  line-height: 1em;
+}
+
+.comments .reply-form input:focus, .comments .reply-form textarea:focus {
+  border-color: black;
+  box-shadow: 0;
+  outline: 0;
+}
+
+main .comments header a {
+  float: right;
+  margin-right: 1em;
+}
+
 main .comment_body {
   margin-bottom: 1em;
 }

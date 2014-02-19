@@ -9,6 +9,7 @@ import tempfile
 from contextlib import closing
 from string import Template
 import wsgiref.util
+import cgi
 from urllib import quote_plus, unquote_plus
 
 
@@ -28,6 +29,8 @@ class Blog(object):
                            '\t<meta charset="utf-8"/>\n'
                            '\t<link rel="stylesheet" href="${base}/styles.css" '
                            'type="text/css" media="screen"/>\n'
+                           '<script type="text/javascript" '
+                           'src="${base}/script.js"></script>'
                            '\t<title>Lipstick blog</title>\n'
                            '</head>\n'
                            '<body>\n'
@@ -49,10 +52,9 @@ class Blog(object):
     _tpl_entries_begin = '\t\t<section>\n'
     _tpl_entry = Template('\t\t\t<article>\n'
                           '\t\t\t<header>\n'
-                          '\t\t\t\t<a href="#">'
-                          '<h2>${title}</h2></a></header>\n'
+                          '\t\t\t\t<h2>${title}</h2></header>\n'
                           '\t\t\t<time>${time}</time>\n'
-                          '\t\t\t<p>${post}</p>\n'
+                          '\t\t\t<p>${text}</p>\n'
                           '\t\t\t<footer>\n'
                           '\t\t\t\t<div>posted in ${categories}</div>\n'
                           '\t\t\t\t<div><a href="#">${comments}</a>'
@@ -85,6 +87,44 @@ class Blog(object):
                            '</body>\n'
                            '</html>\n')
 
+    _tpl_post = Template('\t\t\t<article>\n'
+                         '\t\t\t\t<header><h2>${title}</h2></header>\n'
+                         '\t\t\t\t<time>${time}</time>\n'
+                         '\t\t\t\t<p>${text}</p>\n'
+                         '\t\t\t\t<footer>\n'
+                         '\t\t\t\t<div>posted in ${categories}</div>\n'
+                         '\t\t\t\t<div class="comments">\n'
+                         '\t\t\t\t<header><h3>${comments_title}</h3>'
+                         '<a href="#" onclick="toggleReplyForm(\'reply-form\');'
+                         'return false;">Reply</a></header>\n'
+                         '\t\t\t\t<div id="reply-form" '
+                         'style="display:none;">\n'
+                         '\t\t\t\t<form method="post" class="reply-form"'
+                         'action="${reply_url}">\n'
+                         '\t\t\t\t<div><input name="email" id="email" '
+                         'type="text" placeholder="Email" value=""/></div>\n'
+                         '\t\t\t\t<div><input name="name" id="name" '
+                         'type="text" placeholder="Name" value=""/></div>\n'
+                         '\t\t\t\t<div><textarea rows="4" placeholder="Comment"'
+                         ' name="comment"></textarea></div>\n'
+                         '\t\t\t\t<div><input type="submit" value="Send"/>'
+                         '</div>\n'
+                         '\t\t\t\t</form>\n'
+                         '\t\t\t\t</div>\n'
+                         '\t\t\t\t\t${comments}\n'
+                         '\t\t\t\t</div>\n'
+                         '\t\t\t\t</footer>\n'
+                         '\t\t\t</article>\n')
+
+    _tpl_comment = Template('\t\t\t\t<div class="comment">\n'
+                            '\t\t\t\t<div class="comment_body">\n'
+                            '\t\t\t\t<header><h3>${name}</h3>'
+                            '<time>${time}</time></header>\n'
+                            '\t\t\t\t<p>${comment}</p>\n'
+                            '\t\t\t\t<footer><a href="#">Reply</a></footer>\n'
+                            '\t\t\t\t</div>\n'
+                            '\t\t\t\t</div>\n')
+
     def __init__(self):
         self.environ = None
         self.response = None
@@ -104,6 +144,8 @@ class Blog(object):
                                                                  'entries'))
         self.indices_dir = conf.get('indices_path', os.path.join(script_path,
                                                                  'indices'))
+        self.comments_dir = conf.get('comments_path', os.path.join(script_path,
+                                                                   'comments'))
         self.file_name_sep = conf.get('file_name_separator', '-')
         try:
             self.items_per_page = int(conf.get('items_per_page', 7))
@@ -114,24 +156,11 @@ class Blog(object):
         self.categories = self.list_categories()
         self.archive = self.list_archive()
 
-    def list_entry_files(self):
-        re_file_name = re.compile('^.+' + self.file_name_sep +
-                                  '(\d{4}-\d{2}-\d{2})\.txt$')
-        for file_name in os.listdir(self.entries_dir):
-            if os.path.isfile(os.path.join(self.entries_dir, file_name)):
-                matched = re_file_name.match(file_name)
-                if matched:
-                    try:
-                        date = datetime.strptime(matched.group(1), '%Y-%m-%d')
-                        yield date, file_name
-                    except ValueError:
-                        continue
-
-    def _serialize_object(self, obj, file_path):
+    def _serialize_object(self, obj, file_path, force=False):
         tmp_fd, tmp_path = tempfile.mkstemp(dir=self.indices_dir)
         with closing(os.fdopen(tmp_fd, 'wb')) as tmp_file:
             cPickle.dump(obj, tmp_file, protocol=cPickle.HIGHEST_PROTOCOL)
-        if not os.path.exists(file_path):
+        if not os.path.exists(file_path) or force:
             os.rename(tmp_path, file_path)
             self._logger.info('an object was serialized into file [%s]',
                               file_path)
@@ -147,8 +176,18 @@ class Blog(object):
 
     def _create_main_index(self, main_index_path):
         entries = list()
-        for date, file_name in self.list_entry_files():
-            entries.append((date, file_name, self._read_categories(file_name)))
+        re_file_name = re.compile('^(.+)' + self.file_name_sep +
+                                  '(\d{4}-\d{2}-\d{2})\.txt$')
+        for file_name in os.listdir(self.entries_dir):
+            if os.path.isfile(os.path.join(self.entries_dir, file_name)):
+                matched = re_file_name.match(file_name)
+                if matched:
+                    try:
+                        date = datetime.strptime(matched.group(2), '%Y-%m-%d')
+                        entries.append((date, matched.group(1),
+                                        self._read_categories(file_name)))
+                    except ValueError:
+                        continue
         entries.sort(reverse=True, key=lambda entry: (entry[0], entry[1]))
         self._serialize_object(entries, main_index_path)
         return entries
@@ -170,6 +209,9 @@ class Blog(object):
                                               'text/plain; charset=%s' %
                                               self._encoding)])
         return response
+
+    def redirect(self, url):
+        self.response(self._statuses[303], [('Location', url)])
 
     @staticmethod
     def parse_page(page):
@@ -198,10 +240,12 @@ class Blog(object):
         return self.index
 
     def read_post(self, entry):
-        date, file_name, cats = entry
+        date, pid, cats = entry
         post = dict()
         post['date'] = date
-        with open(os.path.join(self.entries_dir, file_name)) as f:
+        post['id'] = pid
+        with open(os.path.join(self.entries_dir,
+                               self.build_file_name(entry))) as f:
             preview, full = False, False
             for line in f:
                 if line.startswith('categories:') and not 'categories' in post:
@@ -254,6 +298,19 @@ class Blog(object):
             uri += '/page/' + str(page)
         return uri
 
+    def build_file_name(self, entry):
+        date, pid, _ = entry
+        return pid + self.file_name_sep + date.strftime('%Y-%m-%d') + '.txt'
+
+    def find_entry(self, archive, pid):
+        try:
+            date = datetime.strptime(archive, '%Y-%m-%d')
+            entry = next(entry for entry in self.index
+                         if (date, pid) == entry[0:2])
+            return entry if entry else None
+        except ValueError:
+            return None
+
     def configure(self, environ, start_response):
         self.environ = environ
         self.response = start_response
@@ -292,12 +349,17 @@ class Blog(object):
                         post_text = post['full']
                     else:
                         post_text = ''
-                    yield self._tpl_entry.safe_substitute(title=post['title'],
+                    title = self.\
+                        _tpl_link.substitute(link=self.app_uri + '/post/' +
+                                             post['date'].
+                                             strftime('%Y-%m-%d') + '/' +
+                                             post['id'], title=post['title'])
+                    yield self._tpl_entry.safe_substitute(title=title,
                                                           categories=
                                                           fmt_categories,
                                                           time=post['date'].
                                                           strftime('%Y/%m/%d'),
-                                                          post=post_text,
+                                                          text=post_text,
                                                           comments=
                                                           'No comments')
                 yield self._tpl_entries_end
@@ -338,6 +400,99 @@ class Blog(object):
         else:
             yield self.status(404, 'Page %d not found' % page)
 
+    def get_post(self, archive, pid):
+        entry = self.find_entry(archive, pid)
+        if entry:
+            post = self.read_post(entry)
+            self.response(self._statuses[200], [('Content-Type',
+                                                 'text/html; charset=%s' %
+                                                 self._encoding)])
+            yield self._tpl_header.safe_substitute(base=self.app_uri)
+            yield self._tpl_entries_begin
+            fmt_categories = ", ".join(
+                [self._tpl_link.safe_substitute(link=self.app_uri +
+                                                '/category/' +
+                                                quote_plus(cat),
+                                                title=cat)
+                 for cat in post['categories']])
+            if 'preview' in post:
+                post_text = post['preview']
+            elif 'full' in post:
+                post_text = post['full']
+            else:
+                post_text = ''
+            comments_path = os.path.join(self.comments_dir, pid +
+                                         self.file_name_sep + archive +
+                                         '.comments')
+            comments_str = ''
+            comments_title = 'No comments'
+            if os.path.exists(comments_path):
+                with open(comments_path, 'rb') as f:
+                    comments = cPickle.load(f)
+                if len(comments) == 1:
+                    comments_title = '1 comment'
+                elif len(comments) > 1:
+                    comments_title = '%d comments' % len(comments)
+                comments_str = "".join([self._tpl_comment.
+                                        safe_substitute(name=name
+                                                        or 'anonymous',
+                                                        time=date.
+                                                        strftime('%Y/%m/%d '
+                                                                 '@ %H:%M'),
+                                                        comment=text)
+                                        for date, _, name, _, text in
+                                        comments])
+            yield self._tpl_post.safe_substitute(title=post['title'],
+                                                 categories=fmt_categories,
+                                                 time=post['date'].
+                                                 strftime('%Y/%m/%d'),
+                                                 text=post_text,
+                                                 comments_title=comments_title,
+                                                 comments=comments_str,
+                                                 reply_url=self.app_uri +
+                                                 '/post/' + archive + '/' + pid)
+            yield self._tpl_entries_end
+            fmt_categories = "".join(
+                [self._tpl_aside_entry.safe_substitute(link=self.app_uri +
+                                                       '/category/' +
+                                                       quote_plus(cat),
+                                                       title=cat)
+                 for cat in self.categories])
+            fmt_archive = "".join(
+                [self._tpl_aside_entry.safe_substitute(link=self.app_uri +
+                                                       '/archive/' +
+                                                       quote_plus(arc),
+                                                       title=arc)
+                 for arc in self.archive])
+            yield self._tpl_aside.safe_substitute(categories=fmt_categories,
+                                                  archive=fmt_archive)
+        else:
+            yield self.status(404, 'Post %s not found' % archive + '/' +
+                                   pid)
+
+    def post_comment(self, archive, pid):
+        entry = self.find_entry(archive, pid)
+        if entry:
+            fs = cgi.FieldStorage(keep_blank_values=1,
+                                  fp=self.environ['wsgi.input'],
+                                  environ=self.environ)
+            email = fs.getvalue('email', '')
+            name = fs.getvalue('name', '')
+            comment = fs.getvalue('comment', '')
+            path_comment_file = os.path.\
+                join(self.comments_dir, pid + self.file_name_sep + archive +
+                     '.comments')
+            comments = list()
+            if os.path.exists(path_comment_file):
+                with open(path_comment_file, 'rb') as f:
+                    comments = cPickle.load(f)
+            comments.append((datetime.now(), email, name, comment))
+            comments.sort(key=lambda c: c[0])
+            self._serialize_object(comments, path_comment_file, force=True)
+            self.redirect(self.app_uri + '/post/' + archive + '/' + pid)
+        else:
+            yield self.status(404, 'Post %s not found' % archive + '/' + pid)
+
     def __call__(self, environ, start_response):
         try:
             self.configure(environ, start_response)
@@ -362,8 +517,15 @@ class Blog(object):
                     path_els = path.split('/')
                     return self.get_list(archive=path_els[2], page=self.
                                          parse_page(path_els[4]))
+                elif re.match('^/post/\d{4}-\d{2}-\d{2}/[^/]+/?$', path):
+                    path_els = path.split('/')
+                    return self.get_post(archive=path_els[2],
+                                         pid=unquote_plus(path_els[3]))
             elif method == 'POST':
-                return self.status(404, 'Page %s not found' % path)
+                if re.match('^/post/\d{4}-\d{2}-\d{2}/[^/]+/?$', path):
+                    path_els = path.split('/')
+                    return self.post_comment(archive=path_els[2],
+                                             pid=unquote_plus(path_els[3]))
             return self.status(404, 'Page %s not found' % path)
         except BlogException as e:
             return self.status(e.code, e.message)
