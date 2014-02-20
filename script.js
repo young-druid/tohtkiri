@@ -1,4 +1,11 @@
 function toggleReplyForm(elId){
+  var els = document.getElementsByClassName('reply-wrapper')
+  for (var i = 0; i < els.length; i++){
+    var divEl = els[i];
+    if (divEl.id != elId){
+      divEl.style.display = 'none';
+    }
+  }
   var el = document.getElementById(elId);
   if (el.style.display == 'none') {
     el.style.display = 'block';

@@ -32,7 +32,7 @@
                 </div>
                 <div class="comments">
                     <header><h3>4 comments</h3><a href="#" onclick="toggleReplyForm('reply-form');return false;">Reply</a></header>
-                    <div id="reply-form" style="display: none;">
+                    <div class="reply-wrapper" id="reply-form" style="display: none;">
                         <form class="reply-form">
                             <div><input name="name" type="text" value="" placeholder="website"/></div>
                             <div><input name="email" type="text" value="" placeholder="email"/></div>
@@ -47,7 +47,21 @@
                             </header>
                             <p>Да не верю, что их в ирлашку пустили. Уже два
                                 года обещают</p>
-                            <footer><a href="#">Reply</a></footer>
+                            <footer><a href="#" onclick="toggleReplyForm('reply-form-0');return false;">Reply</a></footer>
+                            <div class="reply-wrapper" id="reply-form-0" style="display: none;">
+                                <form class="reply-form">
+                                    <div><input name="name" type="text" value=""
+                                                placeholder="website"/></div>
+                                    <div><input name="email" type="text"
+                                                value="" placeholder="email"/>
+                                    </div>
+                                    <div><textarea rows="4"
+                                                   placeholder="comment"></textarea>
+                                    </div>
+                                    <div><input type="submit" value="Send"/>
+                                    </div>
+                                </form>
+                            </div>
                         </div>
                         <div class="reply_comments">
                             <div class="comment">
@@ -56,7 +70,21 @@
                                         <time>2014/02/09 @ 09:10</time>
                                     </header>
                                     <p>У нас в Латвии до сих пор не открыли</p>
-                                    <footer><a href="#">Reply</a></footer>
+                                    <footer><a href="#" onclick="toggleReplyForm('reply-form-0-0');return false;">Reply</a></footer>
+                                   <div class="reply-wrapper" id="reply-form-0-0" style="display: none;">
+                                        <form class="reply-form">
+                                            <div><input name="name" type="text" value=""
+                                                        placeholder="website"/></div>
+                                            <div><input name="email" type="text"
+                                                        value="" placeholder="email"/>
+                                            </div>
+                                            <div><textarea rows="4"
+                                                           placeholder="comment"></textarea>
+                                            </div>
+                                            <div><input type="submit" value="Send"/>
+                                            </div>
+                                        </form>
+                                    </div>
                                 </div>
                                 <div class="reply_comments">
                                     <div class="comment">
@@ -66,8 +94,22 @@
                                             </header>
                                             <p>Латвия &mdash; это Россиия же
                                                 ))</p>
-                                            <footer><a href="#">Reply</a>
+                                            <footer><a href="#" onclick="toggleReplyForm('reply-form-0-0-0');return false;">Reply</a>
                                             </footer>
+                                           <div class="reply-wrapper" id="reply-form-0-0-0" style="display: none;">
+                                                <form class="reply-form">
+                                                    <div><input name="name" type="text" value=""
+                                                                placeholder="website"/></div>
+                                                    <div><input name="email" type="text"
+                                                                value="" placeholder="email"/>
+                                                    </div>
+                                                    <div><textarea rows="4"
+                                                                   placeholder="comment"></textarea>
+                                                    </div>
+                                                    <div><input type="submit" value="Send"/>
+                                                    </div>
+                                                </form>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -81,7 +123,22 @@
                             </header>
                             <p>А магазины где откроются. Никто не знает.
                                 В Дублине опять только?</p>
-                            <footer><a href="#">Reply</a></footer>
+                            <footer><a href="#" onclick="toggleReplyForm('reply-form-1');return false;">Reply</a>
+                            </footer>
+                           <div class="reply-wrapper" id="reply-form-1" style="display: none;">
+                                <form class="reply-form">
+                                    <div><input name="name" type="text" value=""
+                                                placeholder="website"/></div>
+                                    <div><input name="email" type="text"
+                                                value="" placeholder="email"/>
+                                    </div>
+                                    <div><textarea rows="4"
+                                                   placeholder="comment"></textarea>
+                                    </div>
+                                    <div><input type="submit" value="Send"/>
+                                    </div>
+                                </form>
+                            </div>
                         </div>
                     </div>
                 </div>

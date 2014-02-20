@@ -97,7 +97,7 @@ class Blog(object):
                          '\t\t\t\t<header><h3>${comments_title}</h3>'
                          '<a href="#" onclick="toggleReplyForm(\'reply-form\');'
                          'return false;">Reply</a></header>\n'
-                         '\t\t\t\t<div id="reply-form" '
+                         '\t\t\t\t<div class="reply-wrapper" id="reply-form" '
                          'style="display:none;">\n'
                          '\t\t\t\t<form method="post" class="reply-form"'
                          'action="${reply_url}">\n'
@@ -121,8 +121,29 @@ class Blog(object):
                             '\t\t\t\t<header><h3>${name}</h3>'
                             '<time>${time}</time></header>\n'
                             '\t\t\t\t<p>${comment}</p>\n'
-                            '\t\t\t\t<footer><a href="#">Reply</a></footer>\n'
+                            '\t\t\t\t<footer><a href="#" '
+                            'onclick="toggleReplyForm(\'reply-form-${id}\');'
+                            'return false;">Reply</a></footer>\n'
+                            '\t\t\t\t<div class="reply-wrapper" '
+                            'id="reply-form-${id}" style="display:none;">\n'
+                            '\t\t\t\t<form method="post" class="reply-form"'
+                            'action="${reply_url}">\n'
+                            '\t\t\t\t<input name="comment_no" type="hidden" '
+                            'value="${id}"/>\n'
+                            '\t\t\t\t<div><input name="email" id="email" '
+                            'type="text" placeholder="Email" value=""/></div>\n'
+                            '\t\t\t\t<div><input name="name" id="name" '
+                            'type="text" placeholder="Name" value=""/></div>\n'
+                            '\t\t\t\t<div><textarea rows="4" '
+                            'placeholder="Comment" name="comment"></textarea>'
+                            '</div>\n'
+                            '\t\t\t\t<div><input type="submit" value="Send"/>'
+                            '</div>\n'
+                            '\t\t\t\t</form>\n'
                             '\t\t\t\t</div>\n'
+                            '\t\t\t\t</div>\n'
+                            '\t\t\t\t<div class="reply_comments">${comments}'
+                            '</div>\n'
                             '\t\t\t\t</div>\n')
 
     def __init__(self):
@@ -311,6 +332,38 @@ class Blog(object):
         except ValueError:
             return None
 
+    def add_comment(self, comments, comment, comments_num):
+        if not comments_num:
+            comments.append(comment)
+            comments.sort(key=lambda c: c[0], reverse=True)
+            return True
+        else:
+            index = comments_num[0]
+            if index < len(comments):
+                return self.add_comment(comments[comments_num[0]][4], comment,
+                                        comments_num[1:])
+        return False
+
+    def gather_comments(self, comments, reply_url, ids=None):
+        buf = []
+        count = 0
+        if not ids:
+            ids = list()
+        for idx, comment in enumerate(comments):
+            date, _, name, text, replies = comment
+            _ids = list(ids)
+            _ids.append(str(idx))
+            comments_str, comments_count = self.gather_comments(replies,
+                                                                reply_url, _ids)
+            buf.append(self._tpl_comment.
+                       safe_substitute(name=name or 'anonymous', time=date.
+                                       strftime('%Y/%m/%d @ %H:%M'),
+                                       reply_url=reply_url,
+                                       id="-".join(_ids), comment=text,
+                                       comments=comments_str))
+            count += comments_count
+        return "".join(buf), count
+
     def configure(self, environ, start_response):
         self.environ = environ
         self.response = start_response
@@ -424,30 +477,25 @@ class Blog(object):
             comments_path = os.path.join(self.comments_dir, pid +
                                          self.file_name_sep + archive +
                                          '.comments')
-            comments_str = ''
             comments_title = 'No comments'
+            comments_str = ''
             if os.path.exists(comments_path):
                 with open(comments_path, 'rb') as f:
                     comments = cPickle.load(f)
-                if len(comments) == 1:
+                comments_str, count = self.gather_comments(comments,
+                                                           self.app_uri +
+                                                           '/post/' + archive +
+                                                           '/' + pid)
+                if count == 1:
                     comments_title = '1 comment'
-                elif len(comments) > 1:
+                elif count > 1:
                     comments_title = '%d comments' % len(comments)
-                comments_str = "".join([self._tpl_comment.
-                                        safe_substitute(name=name
-                                                        or 'anonymous',
-                                                        time=date.
-                                                        strftime('%Y/%m/%d '
-                                                                 '@ %H:%M'),
-                                                        comment=text)
-                                        for date, _, name, _, text in
-                                        comments])
             yield self._tpl_post.safe_substitute(title=post['title'],
                                                  categories=fmt_categories,
                                                  time=post['date'].
                                                  strftime('%Y/%m/%d'),
-                                                 text=post_text,
-                                                 comments_title=comments_title,
+                                                 text=post_text, comments_title=
+                                                 comments_title,
                                                  comments=comments_str,
                                                  reply_url=self.app_uri +
                                                  '/post/' + archive + '/' + pid)
@@ -479,17 +527,30 @@ class Blog(object):
             email = fs.getvalue('email', '')
             name = fs.getvalue('name', '')
             comment = fs.getvalue('comment', '')
-            path_comment_file = os.path.\
-                join(self.comments_dir, pid + self.file_name_sep + archive +
-                     '.comments')
-            comments = list()
-            if os.path.exists(path_comment_file):
-                with open(path_comment_file, 'rb') as f:
-                    comments = cPickle.load(f)
-            comments.append((datetime.now(), email, name, comment))
-            comments.sort(key=lambda c: c[0])
-            self._serialize_object(comments, path_comment_file, force=True)
-            self.redirect(self.app_uri + '/post/' + archive + '/' + pid)
+            comments_no_str = fs.getvalue('comment_no')
+            try:
+                comments_no = [int(comment_no) for comment_no
+                               in comments_no_str.split("-")] if \
+                    comments_no_str else []
+                path_comment_file = os.path.\
+                    join(self.comments_dir, pid + self.file_name_sep + archive +
+                         '.comments')
+                comments = list()
+                if os.path.exists(path_comment_file):
+                    with open(path_comment_file, 'rb') as f:
+                        comments = cPickle.load(f)
+                added = self.add_comment(comments, (datetime.now(), email, name,
+                                                    comment, []), comments_no)
+                if added:
+                    self._serialize_object(comments, path_comment_file,
+                                           force=True)
+                else:
+                    self._logger.warn("Comment were not added. comment_no is ["
+                                      "%s]", comments_no_str)
+                self.redirect(self.app_uri + '/post/' + archive + '/' + pid)
+            except ValueError:
+                yield self.status(400, 'I cannot understand comment_no [%s] '
+                                       'parameter' % comments_no_str)
         else:
             yield self.status(404, 'Post %s not found' % archive + '/' + pid)
 
