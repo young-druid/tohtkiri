@@ -57,8 +57,7 @@ class Blog(object):
                           '\t\t\t<p>${text}</p>\n'
                           '\t\t\t<footer>\n'
                           '\t\t\t\t<div>posted in ${categories}</div>\n'
-                          '\t\t\t\t<div><a href="#">${comments}</a>'
-                          '</div>\n'
+                          '\t\t\t\t<div>${comments}</div>\n'
                           '\t\t\t</footer>\n'
                           '\t\t\t</article>\n')
     _tpl_view_full = Template('<a href="#">View full post &rarr;</a>')
@@ -95,8 +94,8 @@ class Blog(object):
                          '\t\t\t\t<div>posted in ${categories}</div>\n'
                          '\t\t\t\t<div class="comments">\n'
                          '\t\t\t\t<header><h3>${comments_title}</h3>'
-                         '<a href="#" onclick="toggleReplyForm(\'reply-form\');'
-                         'return false;">Reply</a></header>\n'
+                         '<a onclick="toggleReplyForm(\'reply-form\');'
+                         'return false;" href="#comments">Reply</a></header>\n'
                          '\t\t\t\t<div class="reply-wrapper" id="reply-form" '
                          'style="display:none;">\n'
                          '\t\t\t\t<form method="post" class="reply-form"'
@@ -181,12 +180,14 @@ class Blog(object):
         tmp_fd, tmp_path = tempfile.mkstemp(dir=self.indices_dir)
         with closing(os.fdopen(tmp_fd, 'wb')) as tmp_file:
             cPickle.dump(obj, tmp_file, protocol=cPickle.HIGHEST_PROTOCOL)
-        if not os.path.exists(file_path) or force:
-            os.rename(tmp_path, file_path)
-            self._logger.info('an object was serialized into file [%s]',
-                              file_path)
-        else:
-            os.remove(tmp_path)
+        try:
+            if not os.path.exists(file_path) or force:
+                os.rename(tmp_path, file_path)
+                self._logger.info('an object was serialized into file [%s]',
+                                  file_path)
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
 
     def _try_main_index(self, main_index_path):
         if not os.path.exists(main_index_path):
@@ -346,7 +347,7 @@ class Blog(object):
 
     def gather_comments(self, comments, reply_url, ids=None):
         buf = []
-        count = 0
+        count = len(comments)
         if not ids:
             ids = list()
         for idx, comment in enumerate(comments):
@@ -356,13 +357,31 @@ class Blog(object):
             comments_str, comments_count = self.gather_comments(replies,
                                                                 reply_url, _ids)
             buf.append(self._tpl_comment.
-                       safe_substitute(name=name or 'anonymous', time=date.
-                                       strftime('%Y/%m/%d @ %H:%M'),
-                                       reply_url=reply_url,
-                                       id="-".join(_ids), comment=text,
+                       safe_substitute(name=cgi.escape(name) or 'anonymous',
+                                       time=date.strftime('%Y/%m/%d @ %H:%M'),
+                                       reply_url=reply_url, id="-".join(_ids),
+                                       comment=cgi.escape(text),
                                        comments=comments_str))
             count += comments_count
         return "".join(buf), count
+
+    def load_comments(self, archive, pid):
+        comments_path = os.path.join(self.comments_dir,
+                                     pid + self.file_name_sep + archive +
+                                     '.comments')
+        if os.path.exists(comments_path):
+            with open(comments_path, 'rb') as f:
+                return cPickle.load(f)
+        else:
+            return list()
+
+    def count_comments(self, comments):
+        if comments:
+            count = len(comments)
+            for _, _, _, _, replies in comments:
+                count += self.count_comments(replies)
+            return count
+        return 0
 
     def configure(self, environ, start_response):
         self.environ = environ
@@ -390,6 +409,7 @@ class Blog(object):
                 items_to = self.items_per_page * page
                 for entry in entries[items_to - self.items_per_page:items_to]:
                     post = self.read_post(entry)
+                    date_for_link = post['date'].strftime('%Y-%m-%d')
                     fmt_categories = ", ".join(
                         [self._tpl_link.safe_substitute(link=self.app_uri +
                                                         '/category/' +
@@ -404,17 +424,27 @@ class Blog(object):
                         post_text = ''
                     title = self.\
                         _tpl_link.substitute(link=self.app_uri + '/post/' +
-                                             post['date'].
-                                             strftime('%Y-%m-%d') + '/' +
-                                             post['id'], title=post['title'])
+                                             date_for_link + '/' + post['id'],
+                                             title=post['title'])
+                    comments_count = self.\
+                        count_comments(self.load_comments(date_for_link,
+                                                          post['id']))
+                    comments_str = 'No comments'
+                    if comments_count == 1:
+                        comments_str = '1 comment'
+                    elif comments_count > 1:
+                        comments_str = '%d comments' % comments_count
+                    comments_str = self._tpl_link.\
+                        substitute(link=self.app_uri + '/post/' +
+                                   date_for_link + '/' + post['id'] +
+                                   '#comments', title=comments_str)
                     yield self._tpl_entry.safe_substitute(title=title,
                                                           categories=
                                                           fmt_categories,
                                                           time=post['date'].
                                                           strftime('%Y/%m/%d'),
                                                           text=post_text,
-                                                          comments=
-                                                          'No comments')
+                                                          comments=comments_str)
                 yield self._tpl_entries_end
                 fmt_categories = "".join(
                     [self._tpl_aside_entry.safe_substitute(link=self.app_uri +
@@ -489,7 +519,7 @@ class Blog(object):
                 if count == 1:
                     comments_title = '1 comment'
                 elif count > 1:
-                    comments_title = '%d comments' % len(comments)
+                    comments_title = '%d comments' % count
             yield self._tpl_post.safe_substitute(title=post['title'],
                                                  categories=fmt_categories,
                                                  time=post['date'].
