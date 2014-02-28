@@ -26,11 +26,13 @@ class Blog(object):
     _tpl_header = Template('<!DOCTYPE html>\n'
                            '<html xmlns="http://www.w3.org/1999/html">\n'
                            '<head lang="en">\n'
-                           '\t<meta charset="utf-8"/>\n'
+                           '\t<meta charset="${encoding}"/>\n'
                            '\t<link rel="stylesheet" href="${base}/styles.css" '
                            'type="text/css" media="screen"/>\n'
-                           '<script type="text/javascript" '
-                           'src="${base}/script.js"></script>'
+                           '\t<script type="text/javascript" '
+                           'src="${base}/script.js"></script>\n'
+                           '\t<link type="application/atom+xml" rel="alternate"'
+                           ' title="Blog atom feed" href="${feed_url}" />\n'
                            '\t<title>Lipstick blog</title>\n'
                            '</head>\n'
                            '<body>\n'
@@ -145,6 +147,32 @@ class Blog(object):
                             '</div>\n'
                             '\t\t\t\t</div>\n')
 
+    _tpl_feed_begin = Template('<?xml version="1.0" encoding="${encoding}"?>\n'
+                               '<feed xmlns="http://www.w3.org/2005/Atom">\n'
+                               '\t<title>Lipstick blog</title>\n'
+                               '\t<link rel="self" type="text/xml" '
+                               'href="${self_url}"/>\n'
+                               '\t<link type="text/html" rel="alternate" '
+                               'href="${url}"/>\n'
+                               '\t<updated>${updated}</updated>\n'
+                               '\t<author><name>${author}</name></author>\n'
+                               '\t<id>urn:${id}</id>\n')
+
+    _tpl_feed_entry = Template('\t<entry>\n'
+                               '\t\t<id>urn:${id}</id>\n'
+                               '\t\t<title>${title}</title>\n'
+                               '\t\t<link type="text/html" rel="alternate" '
+                               'href="${url}"/>\n'
+                               '${categories}'
+                               '\t\t<updated>${updated}</updated>\n'
+                               '\t\t<content type="text/html">${content}'
+                               '</content>\n'
+                               '\t</entry>\n')
+
+    _tpl_feed_category = Template('\t\t<category term="${category}"/>\n')
+
+    _tpl_feed_end = '</feed>'
+
     def __init__(self):
         self.environ = None
         self.response = None
@@ -171,6 +199,10 @@ class Blog(object):
             self.items_per_page = int(conf.get('items_per_page', 7))
         except ValueError:
             self.items_per_page = 7
+        try:
+            self.items_per_feed = int(conf.get('items_per_feed', 7))
+        except ValueError:
+            self.items_per_feed = 7
         self.index = self._try_main_index(os.path.join(self.indices_dir,
                                                        'main.index'))
         self.categories = self.list_categories()
@@ -403,7 +435,11 @@ class Blog(object):
                 self.response(self._statuses[200], [('Content-Type',
                                                      'text/html; charset=%s' %
                                                      self._encoding)])
-                yield self._tpl_header.safe_substitute(base=self.app_uri)
+                yield self._tpl_header.\
+                    safe_substitute(base=self.app_uri, feed_url=self.app_uri +
+                                    '/rss' + ('/' +
+                                    category if category else ''),
+                                    encoding=self._encoding.lower())
                 yield self._tpl_entries_begin
                 entries = self.filter_entries(category, archive)
                 items_to = self.items_per_page * page
@@ -545,8 +581,51 @@ class Blog(object):
             yield self._tpl_aside.safe_substitute(categories=fmt_categories,
                                                   archive=fmt_archive)
         else:
-            yield self.status(404, 'Post %s not found' % archive + '/' +
-                                   pid)
+            yield self.status(404, 'Post %s not found' % archive + '/' + pid)
+
+    def get_rss(self, category=None):
+        if category and not category in self.categories:
+            yield self.status(404, 'Category %s not found' % category)
+        else:
+            self.response(self._statuses[200], [('Content-Type',
+                                                 'application/atom+xml; '
+                                                 'charset=%s' %
+                                                 self._encoding)])
+            datetime_format = '%Y-%m-%dT%H-%M-%SZ'
+            entries = self.filter_entries(category, None)
+            updated = datetime(1986, 4, 26)
+            if entries:
+                updated = entries[0][0].strftime(datetime_format)
+            yield self._tpl_feed_begin.\
+                safe_substitute(encoding=self._encoding.lower(),
+                                self_url=self.app_uri + '/rss' + ('/' +
+                                category if category else ''),
+                                url=self.app_uri + ('/category/' +
+                                category if category else ''),
+                                id=self.app_uri + ('/category/' +
+                                category if category else ''), updated=updated)
+            for entry in entries[:self.items_per_feed]:
+                post = self.read_post(entry)
+                date_for_link = post['date'].strftime('%Y-%m-%d')
+                post_text = ''
+                if 'preview' in post:
+                    post_text = post['preview']
+                elif 'full' in post:
+                    post_text = post['full']
+
+                fmt_categories = "".join(
+                    [self._tpl_feed_category.safe_substitute(category=cat)
+                     for cat in post['categories']])
+                yield self.\
+                    _tpl_feed_entry.\
+                    safe_substitute(id=date_for_link + ':' + post['id'],
+                                    title=post['title'], url=self.app_uri +
+                                    '/post/' + date_for_link + '/' + post['id'],
+                                    updated=post['date'].
+                                    strftime(datetime_format),
+                                    categories=fmt_categories,
+                                    content=post_text)
+            yield self._tpl_feed_end
 
     def post_comment(self, archive, pid):
         entry = self.find_entry(archive, pid)
@@ -612,6 +691,10 @@ class Blog(object):
                     path_els = path.split('/')
                     return self.get_post(archive=path_els[2],
                                          pid=unquote_plus(path_els[3]))
+                elif re.match('^/rss/?$', path):
+                    return self.get_rss()
+                elif re.match('^/rss/[^/]+/?$', path):
+                    return self.get_rss(path.split('/')[2])
             elif method == 'POST':
                 if re.match('^/post/\d{4}-\d{2}-\d{2}/[^/]+/?$', path):
                     path_els = path.split('/')
