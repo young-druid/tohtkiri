@@ -32,12 +32,12 @@ class Blog(object):
                            '\t<script type="text/javascript" '
                            'src="${base}/script.js"></script>\n'
                            '\t<link type="application/atom+xml" rel="alternate"'
-                           ' title="Blog atom feed" href="${feed_url}" />\n'
-                           '\t<title>Lipstick blog</title>\n'
+                           ' title="${title}" href="${feed_url}" />\n'
+                           '\t<title>${title}</title>\n'
                            '</head>\n'
                            '<body>\n'
                            '\t<header>\n'
-                           '\t\t<h1>Lipstick is life</h1>\n'
+                           '\t\t<h1>${title}</h1>\n'
                            '\t\t<section>\n'
                            '\t\t\t<form method="get" action="${base}/search">'
                            '<label for="search">Search</label>'
@@ -195,6 +195,7 @@ class Blog(object):
         self.comments_dir = conf.get('comments_path', os.path.join(script_path,
                                                                    'comments'))
         self.file_name_sep = conf.get('file_name_separator', '-')
+        self.title = conf.get('title', '')
         try:
             self.items_per_page = int(conf.get('items_per_page', 7))
         except ValueError:
@@ -439,6 +440,7 @@ class Blog(object):
                     safe_substitute(base=self.app_uri, feed_url=self.app_uri +
                                     '/rss' + ('/' +
                                     category if category else ''),
+                                    title=cgi.escape(self.title, quote=True),
                                     encoding=self._encoding.lower())
                 yield self._tpl_entries_begin
                 entries = self.filter_entries(category, archive)
