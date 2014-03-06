@@ -38,12 +38,6 @@ class Blog(object):
                            '<body>\n'
                            '\t<header>\n'
                            '\t\t<h1>${title}</h1>\n'
-                           '\t\t<section>\n'
-                           '\t\t\t<form method="get" action="${base}/search">'
-                           '<label for="search">Search</label>'
-                           '<span><input name="q" id="search" '
-                           'type="text"/></span></form>\n'
-                           '\t\t</section>\n'
                            '\t</header>\n'
                            '\t<main>\n')
 
@@ -120,7 +114,8 @@ class Blog(object):
     _tpl_comment = Template('\t\t\t\t<div class="comment">\n'
                             '\t\t\t\t<div class="comment_body">\n'
                             '\t\t\t\t<header><h3>${name}</h3>'
-                            '<time>${time}</time></header>\n'
+                            '<time>${time}</time><span class="delete">'
+                            '${delete_url}</span></header>\n'
                             '\t\t\t\t<p>${comment}</p>\n'
                             '\t\t\t\t<footer><a href="#" '
                             'onclick="toggleReplyForm(\'reply-form-${id}\');'
@@ -146,6 +141,16 @@ class Blog(object):
                             '\t\t\t\t<div class="reply_comments">${comments}'
                             '</div>\n'
                             '\t\t\t\t</div>\n')
+
+    _tpl_delete_comment = Template('\t\t\t<form method="post" '
+                                   'action="${url}">\n'
+                                   '\t\t\t\t<input name="ids" type="hidden" '
+                                   'value="${ids}"/>\n'
+                                   '\t\t\t\t<input name="password" '
+                                   'type="password" placeholder="Password"/>\n'
+                                   '\t\t\t\t<input type="submit" '
+                                   'value="Delete"/>\n'
+                                   '\t\t\t</form>\n')
 
     _tpl_feed_begin = Template('<?xml version="1.0" encoding="${encoding}"?>\n'
                                '<feed xmlns="http://www.w3.org/2005/Atom">\n'
@@ -378,24 +383,34 @@ class Blog(object):
                                         comments_num[1:])
         return False
 
-    def gather_comments(self, comments, reply_url, ids=None):
-        buf = []
-        count = len(comments)
-        if not ids:
-            ids = list()
-        for idx, comment in enumerate(comments):
-            date, _, name, text, replies = comment
-            _ids = list(ids)
-            _ids.append(str(idx))
-            comments_str, comments_count = self.gather_comments(replies,
-                                                                reply_url, _ids)
-            buf.append(self._tpl_comment.
-                       safe_substitute(name=cgi.escape(name) or 'anonymous',
-                                       time=date.strftime('%Y/%m/%d @ %H:%M'),
-                                       reply_url=reply_url, id="-".join(_ids),
-                                       comment=cgi.escape(text),
-                                       comments=comments_str))
-            count += comments_count
+    def gather_comments(self, comments, archive, pid, admin):
+        reply_url = self.app_uri + '/post/' + archive + '/' + pid
+        delete_url = self.app_uri + '/delete/' + archive + '/' + pid
+
+        def _gather_comments(_comments, _buf, _count, ids):
+            for idx, comment in enumerate(_comments):
+                date, _, name, text, replies = comment
+                _ids = list(ids)
+                _ids.append(str(idx))
+                comments_str, comments_count = \
+                    _gather_comments(replies, [], 0, _ids)
+                ids_str = "-".join(_ids)
+                _buf.append(self._tpl_comment.
+                            safe_substitute(name=cgi.escape(name) or
+                                            'anonymous',
+                                            time=date.strftime('%Y/%m/%d @ '
+                                                               '%H:%M'),
+                                            reply_url=reply_url, id=ids_str,
+                                            comment=cgi.escape(text),
+                                            delete_url=self._tpl_link.
+                                            substitute(link=delete_url + '/' +
+                                                       ids_str,
+                                                       title='X')
+                                            if admin else '',
+                                            comments=comments_str))
+                _count += comments_count
+            return "".join(_buf), _count
+        buf, count = _gather_comments(comments, [], 0, [])
         return "".join(buf), count
 
     def load_comments(self, archive, pid):
@@ -456,6 +471,14 @@ class Blog(object):
                          for cat in post['categories']])
                     if 'preview' in post:
                         post_text = post['preview']
+                        if 'full' in post:
+                            post_text += self.\
+                                _tpl_link.safe_substitute(link=self.app_uri +
+                                                          '/post/' +
+                                                          date_for_link + '/' +
+                                                          post['id'],
+                                                          title='View full post'
+                                                                ' &rarr;')
                     elif 'full' in post:
                         post_text = post['full']
                     else:
@@ -521,14 +544,16 @@ class Blog(object):
         else:
             yield self.status(404, 'Page %d not found' % page)
 
-    def get_post(self, archive, pid):
+    def get_post(self, archive, pid, admin=False):
         entry = self.find_entry(archive, pid)
         if entry:
             post = self.read_post(entry)
             self.response(self._statuses[200], [('Content-Type',
                                                  'text/html; charset=%s' %
                                                  self._encoding)])
-            yield self._tpl_header.safe_substitute(base=self.app_uri)
+            yield self._tpl_header.\
+                safe_substitute(base=self.app_uri,
+                                title=cgi.escape(self.title, quote=True))
             yield self._tpl_entries_begin
             fmt_categories = ", ".join(
                 [self._tpl_link.safe_substitute(link=self.app_uri +
@@ -536,10 +561,10 @@ class Blog(object):
                                                 quote_plus(cat),
                                                 title=cat)
                  for cat in post['categories']])
-            if 'preview' in post:
-                post_text = post['preview']
-            elif 'full' in post:
+            if 'full' in post:
                 post_text = post['full']
+            elif 'preview' in post:
+                post_text = post['preview']
             else:
                 post_text = ''
             comments_path = os.path.join(self.comments_dir, pid +
@@ -550,10 +575,8 @@ class Blog(object):
             if os.path.exists(comments_path):
                 with open(comments_path, 'rb') as f:
                     comments = cPickle.load(f)
-                comments_str, count = self.gather_comments(comments,
-                                                           self.app_uri +
-                                                           '/post/' + archive +
-                                                           '/' + pid)
+                comments_str, count = self.gather_comments(comments, archive,
+                                                           pid, admin)
                 if count == 1:
                     comments_title = '1 comment'
                 elif count > 1:
@@ -567,6 +590,38 @@ class Blog(object):
                                                  comments=comments_str,
                                                  reply_url=self.app_uri +
                                                  '/post/' + archive + '/' + pid)
+            yield self._tpl_entries_end
+            fmt_categories = "".join(
+                [self._tpl_aside_entry.safe_substitute(link=self.app_uri +
+                                                       '/category/' +
+                                                       quote_plus(cat),
+                                                       title=cat)
+                 for cat in self.categories])
+            fmt_archive = "".join(
+                [self._tpl_aside_entry.safe_substitute(link=self.app_uri +
+                                                       '/archive/' +
+                                                       quote_plus(arc),
+                                                       title=arc)
+                 for arc in self.archive])
+            yield self._tpl_aside.safe_substitute(categories=fmt_categories,
+                                                  archive=fmt_archive)
+        else:
+            yield self.status(404, 'Post %s not found' % archive + '/' + pid)
+
+    def get_delete_comment(self, archive, pid, ids_str):
+        entry = self.find_entry(archive, pid)
+        if entry:
+            self.response(self._statuses[200], [('Content-Type',
+                                                 'text/html; charset=%s' %
+                                                 self._encoding)])
+            yield self._tpl_header.\
+                safe_substitute(base=self.app_uri,
+                                title=cgi.escape(self.title, quote=True))
+            yield self._tpl_entries_begin
+            yield self.\
+                _tpl_delete_comment.\
+                safe_substitute(url=self.app_uri + '/delete/' + archive + '/' +
+                                pid, ids=ids_str)
             yield self._tpl_entries_end
             fmt_categories = "".join(
                 [self._tpl_aside_entry.safe_substitute(link=self.app_uri +
@@ -693,6 +748,18 @@ class Blog(object):
                     path_els = path.split('/')
                     return self.get_post(archive=path_els[2],
                                          pid=unquote_plus(path_els[3]))
+                elif re.match('^/post/\d{4}-\d{2}-\d{2}/[^/]+/admin/?$', path):
+                    path_els = path.split('/')
+                    return self.get_post(archive=path_els[2],
+                                         pid=unquote_plus(path_els[3]),
+                                         admin=True)
+                elif re.match('^/delete/\d{4}-\d{2}-\d{2}/[^/]+/\d+(-\d+)*/?$',
+                              path):
+                    path_els = path.split('/')
+                    return self.get_delete_comment(archive=path_els[2],
+                                                   pid=
+                                                   unquote_plus(path_els[3]),
+                                                   ids_str=path_els[4])
                 elif re.match('^/rss/?$', path):
                     return self.get_rss()
                 elif re.match('^/rss/[^/]+/?$', path):

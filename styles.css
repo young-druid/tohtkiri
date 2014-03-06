@@ -38,35 +38,6 @@ body > header > section {
 
 }
 
-body > header > section label {
-  float: left;
-}
-
-body > header > section {
-  position: relative;
-}
-
-body > header > section span {
-  display: block;
-  overflow: hidden;
-  padding: 0 8px 0 6px;
-}
-
-body > header > section input[type="text"] {
-  width: 100%;
-  margin-right: 1.2em;
-}
-
-body > header > section input[type="submit"] {
-  border: 0;
-  position: absolute;
-  top: 4px;
-  right: 3px;
-  background-color: transparent;
-  padding: 0;
-  margin: 2px;
-}
-
 main > section {
   width: 80%;
   float: left;
@@ -140,7 +111,7 @@ main .comments header {
   outline: 0;
 }
 
-main .comments header a {
+main .comments > header a {
   float: right;
   margin-right: 1em;
 }
