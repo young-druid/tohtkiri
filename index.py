@@ -11,6 +11,7 @@ from string import Template
 import wsgiref.util
 import cgi
 from urllib import quote_plus, unquote_plus
+import hashlib
 
 
 class BlogException(Exception):
@@ -143,9 +144,7 @@ class Blog(object):
                             '\t\t\t\t</div>\n')
 
     _tpl_delete_comment = Template('\t\t\t<form method="post" '
-                                   'action="${url}">\n'
-                                   '\t\t\t\t<input name="ids" type="hidden" '
-                                   'value="${ids}"/>\n'
+                                   'action="${url}/${ids}">\n'
                                    '\t\t\t\t<input name="password" '
                                    'type="password" placeholder="Password"/>\n'
                                    '\t\t\t\t<input type="submit" '
@@ -213,6 +212,13 @@ class Blog(object):
                                                        'main.index'))
         self.categories = self.list_categories()
         self.archive = self.list_archive()
+        password = conf.get('password')
+        if password:
+            m = hashlib.md5()
+            m.update(password)
+            self.password = m.digest()
+        else:
+            self.password = None
 
     def _serialize_object(self, obj, file_path, force=False):
         tmp_fd, tmp_path = tempfile.mkstemp(dir=self.indices_dir)
@@ -381,6 +387,20 @@ class Blog(object):
             if index < len(comments):
                 return self.add_comment(comments[comments_num[0]][4], comment,
                                         comments_num[1:])
+        return False
+
+    def delete_comment(self, comments, ids):
+        if not ids:
+            return False
+        elif len(ids) == 1:
+            comment_no = ids[0]
+            if comment_no < len(comments):
+                del comments[comment_no]
+                return True
+        else:
+            comment_no = ids[0]
+            if comment_no < len(comments):
+                return self.delete_comment(comments[comment_no][4], ids[1:])
         return False
 
     def gather_comments(self, comments, archive, pid, admin):
@@ -720,6 +740,45 @@ class Blog(object):
         else:
             yield self.status(404, 'Post %s not found' % archive + '/' + pid)
 
+    def post_delete_comment(self, archive, pid, ids_str):
+        entry = self.find_entry(archive, pid)
+        if entry:
+            fs = cgi.FieldStorage(keep_blank_values=1,
+                                  fp=self.environ['wsgi.input'],
+                                  environ=self.environ)
+            password = fs.getvalue('password', '')
+            m = hashlib.md5()
+            m.update(password)
+            if m.digest() == self.password:
+                try:
+                    ids = [int(id_str) for id_str
+                           in ids_str.split("-")] if ids_str else []
+                    path_comment_file = os.path.\
+                        join(self.comments_dir, pid + self.file_name_sep +
+                             archive + '.comments')
+                    comments = list()
+                    if os.path.exists(path_comment_file):
+                        with open(path_comment_file, 'rb') as f:
+                            comments = cPickle.load(f)
+                    deleted = self.delete_comment(comments, ids)
+                    if deleted:
+                        self._serialize_object(comments, path_comment_file,
+                                               force=True)
+                    else:
+                        self._logger.warn("Comment was not deleted. comment_no "
+                                          "is [%s]", ids_str)
+                    self.redirect(self.app_uri + '/post/' + archive + '/' + pid)
+                except ValueError:
+                    yield self.status(400, 'I cannot understand ids [%s] '
+                                           'parameter' % ids_str)
+            else:
+                self._logger.warn('Wrong password was provided in order '
+                                  'to delete comment %s/%s/%s', archive, pid,
+                                  ids_str)
+                self.redirect(self.app_uri + '/post/' + archive + '/' + pid)
+        else:
+            yield self.status(404, 'Post %s not found' % archive + '/' + pid)
+
     def __call__(self, environ, start_response):
         try:
             self.configure(environ, start_response)
@@ -769,6 +828,12 @@ class Blog(object):
                     path_els = path.split('/')
                     return self.post_comment(archive=path_els[2],
                                              pid=unquote_plus(path_els[3]))
+                elif re.match('^/delete/\d{4}-\d{2}-\d{2}/[^/]+/\d+(-\d+)*/?$',
+                              path):
+                    path_els = path.split('/')
+                    return self.post_delete_comment(path_els[2],
+                                                    unquote_plus(path_els[3]),
+                                                    path_els[4])
             return self.status(404, 'Page %s not found' % path)
         except BlogException as e:
             return self.status(e.code, e.message)
