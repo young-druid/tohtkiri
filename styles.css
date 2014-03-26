@@ -12,6 +12,19 @@ body > header, main, body > footer {
   display: block;
 }
 
+input, textarea, button {
+  margin: 0em;
+  font: -webkit-small-control;
+  color: initial;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-transform: none;
+  text-indent: 0px;
+  text-shadow: none;
+  display: inline-block;
+  text-align: start;
+}
+
 h1 {
   font-size: 2em;
 }
@@ -91,18 +104,34 @@ main .comments header {
   padding: 0.2em 1em;
 }
 
+.comments .reply-form input[type="submit"] {
+  text-align: center;
+}
+
 .comments .reply-form input, .comments .reply-form textarea {
-  width:100%;
-  -webkit-box-sizing: border-box;
-  -moz-box-sizing: border-box;
-  -ms-box-sizing: border-box;
+  display: block;
+  width: 100%;
+  border: 2px solid #222222;
   box-sizing: border-box;
-  border: 2px solid gray;
-  padding: 1px 2px;
+  -ms-box-sizing: border-box;
+  -moz-box-sizing: border-box;
+  -webkit-box-sizing: border-box;
+  -khtml-box-sizing: border-box;
+  outline: none;
+  font-size: 1em;
+  color: #222222;
+  padding-left: 6px;
+  padding-top: 3px;
+  margin: 0px;
+  background-color: white;
+}
+
+.comments .reply-form input:hover, .comments .reply-form textarea:hover {
+  border: 2px solid #999999;
 }
 
 .comments .reply-form input {
-  line-height: 1em;
+  line-height: 1.3em;
 }
 
 .comments .reply-form input:focus, .comments .reply-form textarea:focus {

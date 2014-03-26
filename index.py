@@ -222,8 +222,8 @@ class Blog(object):
         try:
             if not os.path.exists(file_path) or force:
                 os.rename(tmp_path, file_path)
-                self._logger.info('an object was serialized into file [%s]',
-                                  file_path)
+                self._logger.debug('an object was serialized into file [%s]',
+                                   file_path)
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
@@ -364,31 +364,17 @@ class Blog(object):
         except ValueError:
             return None
 
-    def add_comment(self, comments, comment, comments_num):
-        if not comments_num:
-            comments.append(comment)
-            comments.sort(key=lambda c: c[0], reverse=True)
-            return True
-        else:
+    @staticmethod
+    def get_comment(comments, comments_num):
+        comment = None
+        while comments_num:
             index = comments_num[0]
             if index < len(comments):
-                return self.add_comment(comments[comments_num[0]][4], comment,
-                                        comments_num[1:])
-        return False
-
-    def delete_comment(self, comments, ids):
-        if not ids:
-            return False
-        elif len(ids) == 1:
-            comment_no = ids[0]
-            if comment_no < len(comments):
-                del comments[comment_no]
-                return True
-        else:
-            comment_no = ids[0]
-            if comment_no < len(comments):
-                return self.delete_comment(comments[comment_no][4], ids[1:])
-        return False
+                comment = comments[index]
+                comments, comments_num = comment[4], comments_num[1:]
+            else:
+                comment, comments_num = None, None
+        return comment
 
     def gather_comments(self, comments, archive, pid, admin):
         reply_url = self.app_uri + '/post/' + archive + '/' + pid
@@ -693,18 +679,19 @@ class Blog(object):
                 if os.path.exists(path_comment_file):
                     with open(path_comment_file, 'rb') as f:
                         comments = cPickle.load(f)
-                added = self.add_comment(comments, (datetime.now(), email, name,
-                                                    comment, []), comments_no)
-                if added:
-                    self._serialize_object(comments, path_comment_file,
-                                           force=True)
-                else:
-                    self._logger.warn("Comment were not added. comment_no is ["
-                                      "%s]", comments_no_str)
+                parent_comment = self.get_comment(comments, comments_no)
+                replies = parent_comment[4] if parent_comment else comments
+                replies.append((datetime.now(), email, name, comment, []))
+                replies.sort(key=lambda c: c[0], reverse=True)
+                self._serialize_object(comments, path_comment_file, force=True)
                 self.redirect(self.app_uri + '/post/' + archive + '/' + pid)
             except ValueError:
                 yield self.status(400, 'I cannot understand comment_no [%s] '
                                        'parameter' % comments_no_str)
+            except IOError:
+                self._logger.error("IOError occurred while adding comment",
+                                   exc_info=1)
+                self.redirect(self.app_uri + '/post/' + archive + '/' + pid)
         else:
             yield self.status(404, 'Post %s not found' % archive + '/' + pid)
 
@@ -721,20 +708,25 @@ class Blog(object):
                 try:
                     ids = [int(id_str) for id_str
                            in ids_str.split("-")] if ids_str else []
+                    if not ids:
+                        raise ValueError()
                     path_comment_file = os.path.\
                         join(self.comments_dir, pid + self.file_name_sep +
                              archive + '.comments')
-                    comments = list()
                     if os.path.exists(path_comment_file):
                         with open(path_comment_file, 'rb') as f:
                             comments = cPickle.load(f)
-                    deleted = self.delete_comment(comments, ids)
-                    if deleted:
-                        self._serialize_object(comments, path_comment_file,
-                                               force=True)
-                    else:
-                        self._logger.warn("Comment was not deleted. comment_no "
-                                          "is [%s]", ids_str)
+                        id_to_delete = ids.pop()
+                        parent_comment = self.get_comment(comments, ids)
+                        replies = comments if not ids else \
+                            (parent_comment[4] if parent_comment else [])
+                        if id_to_delete < len(replies):
+                            del replies[id_to_delete]
+                            self._serialize_object(comments, path_comment_file,
+                                                   force=True)
+                        else:
+                            self._logger.warn('Comment was not deleted. '
+                                              'comment_no is [%s]', ids_str)
                     self.redirect(self.app_uri + '/post/' + archive + '/' + pid)
                 except ValueError:
                     yield self.status(400, 'I cannot understand ids [%s] '
