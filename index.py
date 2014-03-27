@@ -754,7 +754,6 @@ class Blog(object):
     def __call__(self, environ, start_response):
         self.configure()
         rc = RequestContext(environ, start_response)
-        self._logger.info('env %s' % rc.environ)
         if rc.method == 'GET':
             if not rc.path or rc.path == '/':
                 return self.get_list(rc)
