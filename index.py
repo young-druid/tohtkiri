@@ -14,6 +14,17 @@ from urllib import quote_plus, unquote_plus
 import hashlib
 
 
+class RequestContext(object):
+    def __init__(self, environ, start_response):
+        self.environ = environ
+        self.response = start_response
+        app_uri = wsgiref.util.application_uri(environ)
+        self.app_uri = app_uri if not app_uri.endswith('/') \
+            else app_uri[0:len(app_uri) - 1]
+        self.path = self.environ.get('PATH_INFO', '/')
+        self.method = self.environ['REQUEST_METHOD'].upper()
+
+
 class Blog(object):
     _statuses = {404: '404 Not Found', 200: '200 OK', 303: '303 See Other',
                  400: '400 Bad Request'}
@@ -172,9 +183,6 @@ class Blog(object):
     _tpl_feed_end = '</feed>'
 
     def __init__(self):
-        self.environ = None
-        self.response = None
-        self.app_uri = ""
         self._encoding = 'UTF-8'
         script_path, _ = os.path.split(os.path.realpath(__file__))
         conf = dict()
@@ -265,14 +273,14 @@ class Blog(object):
                     break
         return categories
 
-    def status(self, code, response):
-        self.response(self._statuses[code], [('Content-Type',
-                                              'text/plain; charset=%s' %
-                                              self._encoding)])
+    def status(self, rc, code, response):
+        rc.response(self._statuses[code], [('Content-Type',
+                                            'text/plain; charset=%s' %
+                                            self._encoding)])
         return response
 
-    def redirect(self, url):
-        self.response(self._statuses[303], [('Location', url)])
+    def redirect(self, rc, url):
+        rc.response(self._statuses[303], [('Location', rc.app_uri + url)])
 
     def list_file_names(self):
         main_index_path = os.path.join(self.indices_dir, 'main.index')
@@ -341,8 +349,9 @@ class Blog(object):
         categories.sort()
         return categories
 
-    def build_base_uri(self, category, archive, page):
-        uri = self.app_uri
+    @staticmethod
+    def build_base_uri(app_uri, category, archive, page):
+        uri = app_uri
         if category:
             uri += '/category/' + category
         elif archive:
@@ -376,9 +385,9 @@ class Blog(object):
                 comment, comments_num = None, None
         return comment
 
-    def gather_comments(self, comments, archive, pid, admin):
-        reply_url = self.app_uri + '/post/' + archive + '/' + pid
-        delete_url = self.app_uri + '/delete/' + archive + '/' + pid
+    def gather_comments(self, app_uri, comments, archive, pid, admin):
+        reply_url = app_uri + '/post/' + archive + '/' + pid
+        delete_url = app_uri + '/delete/' + archive + '/' + pid
 
         def _gather_comments(_comments, _buf, _count, ids):
             for idx, comment in enumerate(_comments):
@@ -421,28 +430,25 @@ class Blog(object):
             return count
         return 0
 
-    def configure(self, environ, start_response):
-        self.environ = environ
-        self.response = start_response
-        self.app_uri = wsgiref.util.application_uri(environ)
+    def configure(self):
         main_index_path = os.path.join(self.indices_dir, 'main.index')
         if not os.path.exists(main_index_path):
             self.index = self._try_main_index(main_index_path)
             self.categories = self.list_categories()
             self.archive = self.list_archive()
 
-    def get_list(self, category=None, archive=None, page=1):
+    def get_list(self, rc, category=None, archive=None, page=1):
         if page > 0:
             if category and not category in self.categories:
-                yield self.status(404, 'Category %s not found' % category)
+                yield self.status(rc, 404, 'Category %s not found' % category)
             elif archive and not archive in self.archive:
-                yield self.status(404, 'Archive %s not found' % archive)
+                yield self.status(rc, 404, 'Archive %s not found' % archive)
             else:
-                self.response(self._statuses[200], [('Content-Type',
-                                                     'text/html; charset=%s' %
-                                                     self._encoding)])
+                rc.response(self._statuses[200], [('Content-Type',
+                                                   'text/html; charset=%s' %
+                                                   self._encoding)])
                 yield self._tpl_header.\
-                    substitute(base=self.app_uri, feed_url=self.app_uri + '/rss'
+                    substitute(base=rc.app_uri, feed_url=rc.app_uri + '/rss'
                                + ('/' + category if category else ''),
                                title=cgi.escape(self.title, quote=True),
                                encoding=self._encoding.lower())
@@ -453,7 +459,7 @@ class Blog(object):
                     post = self.read_post(entry)
                     date_for_link = post['date'].strftime('%Y-%m-%d')
                     fmt_categories = ", ".join(
-                        [self._tpl_link.substitute(link=self.app_uri +
+                        [self._tpl_link.substitute(link=rc.app_uri +
                                                    '/category/' +
                                                    quote_plus(cat), title=cat)
                          for cat in post['categories']])
@@ -461,7 +467,7 @@ class Blog(object):
                         post_text = post['preview']
                         if 'full' in post:
                             post_text += self.\
-                                _tpl_link.substitute(link=self.app_uri +
+                                _tpl_link.substitute(link=rc.app_uri +
                                                      '/post/' + date_for_link +
                                                      '/' + post['id'], title=
                                                      'View full post &rarr;')
@@ -470,7 +476,7 @@ class Blog(object):
                     else:
                         post_text = ''
                     title = self.\
-                        _tpl_link.substitute(link=self.app_uri + '/post/' +
+                        _tpl_link.substitute(link=rc.app_uri + '/post/' +
                                              date_for_link + '/' + post['id'],
                                              title=post['title'])
                     comments_count = self.\
@@ -482,7 +488,7 @@ class Blog(object):
                     elif comments_count > 1:
                         comments_str = '%d comments' % comments_count
                     comments_str = self._tpl_link.\
-                        substitute(link=self.app_uri + '/post/' +
+                        substitute(link=rc.app_uri + '/post/' +
                                    date_for_link + '/' + post['id'] +
                                    '#comments', title=comments_str)
                     yield self._tpl_entry.\
@@ -491,13 +497,13 @@ class Blog(object):
                                    text=post_text, comments=comments_str)
                 yield self._tpl_entries_end
                 fmt_categories = "".join(
-                    [self._tpl_aside_entry.substitute(link=self.app_uri +
+                    [self._tpl_aside_entry.substitute(link=rc.app_uri +
                                                       '/category/' +
                                                       quote_plus(cat),
                                                       title=cat)
                      for cat in self.categories])
                 fmt_archive = "".join(
-                    [self._tpl_aside_entry.substitute(link=self.app_uri +
+                    [self._tpl_aside_entry.substitute(link=rc.app_uri +
                                                       '/archive/' +
                                                       quote_plus(arc),
                                                       title=arc)
@@ -509,7 +515,8 @@ class Blog(object):
                     if items_to < len(entries):
                         older_newer = self.\
                             _tpl_link_wth_cls.\
-                            substitute(link=self.build_base_uri(category,
+                            substitute(link=Blog.build_base_uri(rc.app_uri,
+                                                                category,
                                                                 archive,
                                                                 page + 1),
                                        cls='older',
@@ -518,29 +525,30 @@ class Blog(object):
                             len(entries):
                         older_newer += self.\
                             _tpl_link_wth_cls.\
-                            substitute(link=self.build_base_uri(category,
+                            substitute(link=Blog.build_base_uri(rc.app_uri,
+                                                                category,
                                                                 archive,
                                                                 page - 1),
                                        cls='newer',
                                        title='Newer&nbsp;&#9658;')
                 yield self._tpl_footer.substitute(links=older_newer)
         else:
-            yield self.status(404, 'Page %d not found' % page)
+            yield self.status(rc, 404, 'Page %d not found' % page)
 
-    def get_post(self, archive, pid, admin=False):
+    def get_post(self, rc, archive, pid, admin=False):
         entry = self.find_entry(archive, pid)
         if entry:
             post = self.read_post(entry)
-            self.response(self._statuses[200], [('Content-Type',
-                                                 'text/html; charset=%s' %
-                                                 self._encoding)])
+            rc.response(self._statuses[200], [('Content-Type',
+                                               'text/html; charset=%s' %
+                                               self._encoding)])
             yield self._tpl_header.\
-                substitute(base=self.app_uri, encoding=self._encoding,
-                           feed_url=self.app_uri + '/rss',
+                substitute(base=rc.app_uri, encoding=self._encoding,
+                           feed_url=rc.app_uri + '/rss',
                            title=cgi.escape(self.title, quote=True))
             yield self._tpl_entries_begin
             fmt_categories = ", ".join(
-                [self._tpl_link.substitute(link=self.app_uri + '/category/' +
+                [self._tpl_link.substitute(link=rc.app_uri + '/category/' +
                                            quote_plus(cat), title=cat)
                  for cat in post['categories']])
             if 'full' in post:
@@ -557,8 +565,8 @@ class Blog(object):
             if os.path.exists(comments_path):
                 with open(comments_path, 'rb') as f:
                     comments = cPickle.load(f)
-                comments_str, count = self.gather_comments(comments, archive,
-                                                           pid, admin)
+                comments_str, count = self.gather_comments(rc.app_uri, comments,
+                                                           archive, pid, admin)
                 if count == 1:
                     comments_title = '1 comment'
                 elif count > 1:
@@ -567,63 +575,65 @@ class Blog(object):
                 substitute(title=post['title'], categories=fmt_categories,
                            time=post['date'].strftime('%Y/%m/%d'),
                            text=post_text, comments_title=comments_title,
-                           comments=comments_str, reply_url=self.app_uri +
+                           comments=comments_str, reply_url=rc.app_uri +
                            '/post/' + archive + '/' + pid)
             yield self._tpl_entries_end
             fmt_categories = "".join(
-                [self._tpl_aside_entry.substitute(link=self.app_uri +
+                [self._tpl_aside_entry.substitute(link=rc.app_uri +
                                                   '/category/' +
                                                   quote_plus(cat), title=cat)
                  for cat in self.categories])
             fmt_archive = "".join(
-                [self._tpl_aside_entry.substitute(link=self.app_uri +
+                [self._tpl_aside_entry.substitute(link=rc.app_uri +
                                                   '/archive/' + quote_plus(arc),
                                                   title=arc)
                  for arc in self.archive])
             yield self._tpl_aside.substitute(categories=fmt_categories,
                                              archive=fmt_archive)
         else:
-            yield self.status(404, 'Post %s not found' % archive + '/' + pid)
+            yield self.status(rc, 404, 'Post %s not found' % archive + '/' +
+                                       pid)
 
-    def get_delete_comment(self, archive, pid, ids_str):
+    def get_delete_comment(self, rc, archive, pid, ids_str):
         entry = self.find_entry(archive, pid)
         if entry:
-            self.response(self._statuses[200], [('Content-Type',
-                                                 'text/html; charset=%s' %
-                                                 self._encoding)])
+            rc.response(self._statuses[200], [('Content-Type',
+                                               'text/html; charset=%s' %
+                                               self._encoding)])
             yield self._tpl_header.\
-                substitute(base=self.app_uri, encoding=self._encoding,
-                           feed_url=self.app_uri + '/rss',
+                substitute(base=rc.app_uri, encoding=self._encoding,
+                           feed_url=rc.app_uri + '/rss',
                            title=cgi.escape(self.title, quote=True))
             yield self._tpl_entries_begin
             yield self.\
                 _tpl_delete_comment.\
-                substitute(url=self.app_uri + '/delete/' + archive + '/' + pid,
+                substitute(url=rc.app_uri + '/delete/' + archive + '/' + pid,
                            ids=ids_str)
             yield self._tpl_entries_end
             fmt_categories = "".join(
-                [self._tpl_aside_entry.substitute(link=self.app_uri +
+                [self._tpl_aside_entry.substitute(link=rc.app_uri +
                                                   '/category/' +
                                                   quote_plus(cat), title=cat)
                  for cat in self.categories])
             fmt_archive = "".join(
-                [self._tpl_aside_entry.substitute(link=self.app_uri +
+                [self._tpl_aside_entry.substitute(link=rc.app_uri +
                                                   '/archive/' + quote_plus(arc),
                                                   title=arc)
                  for arc in self.archive])
             yield self._tpl_aside.substitute(categories=fmt_categories,
                                              archive=fmt_archive)
         else:
-            yield self.status(404, 'Post %s not found' % archive + '/' + pid)
+            yield self.status(rc, 404, 'Post %s not found' % archive + '/' +
+                                       pid)
 
-    def get_rss(self, category=None):
+    def get_rss(self, rc, category=None):
         if category and not category in self.categories:
-            yield self.status(404, 'Category %s not found' % category)
+            yield self.status(rc, 404, 'Category %s not found' % category)
         else:
-            self.response(self._statuses[200], [('Content-Type',
-                                                 'application/atom+xml; '
-                                                 'charset=%s' %
-                                                 self._encoding)])
+            rc.response(self._statuses[200], [('Content-Type',
+                                               'application/atom+xml; '
+                                               'charset=%s' %
+                                               self._encoding)])
             datetime_format = '%Y-%m-%dT%H-%M-%SZ'
             entries = self.filter_entries(category, None)
             updated = datetime(1986, 4, 26)
@@ -631,11 +641,11 @@ class Blog(object):
                 updated = entries[0][0].strftime(datetime_format)
             yield self._tpl_feed_begin.\
                 substitute(encoding=self._encoding.lower(),
-                           self_url=self.app_uri + '/rss' +
+                           self_url=rc.app_uri + '/rss' +
                            ('/' + category if category else ''),
-                           author=self.author, url=self.app_uri +
+                           author=self.author, url=rc.app_uri +
                            ('/category/' + category if category else ''),
-                           id=self.app_uri + ('/category/' +
+                           id=rc.app_uri + ('/category/' +
                            category if category else ''), updated=updated)
             for entry in entries[:self.items_per_feed]:
                 post = self.read_post(entry)
@@ -652,18 +662,18 @@ class Blog(object):
                 yield self.\
                     _tpl_feed_entry.\
                     substitute(id=date_for_link + ':' + post['id'],
-                               title=post['title'], url=self.app_uri + '/post/'
+                               title=post['title'], url=rc.app_uri + '/post/'
                                + date_for_link + '/' + post['id'],
                                updated=post['date'].strftime(datetime_format),
                                categories=fmt_categories, content=post_text)
             yield self._tpl_feed_end
 
-    def post_comment(self, archive, pid):
+    def post_comment(self, rc, archive, pid):
         entry = self.find_entry(archive, pid)
         if entry:
             fs = cgi.FieldStorage(keep_blank_values=1,
-                                  fp=self.environ['wsgi.input'],
-                                  environ=self.environ)
+                                  fp=rc.environ['wsgi.input'],
+                                  environ=rc.environ)
             email = fs.getvalue('email', '')
             name = fs.getvalue('name', '')
             comment = fs.getvalue('comment', '')
@@ -684,23 +694,24 @@ class Blog(object):
                 replies.append((datetime.now(), email, name, comment, []))
                 replies.sort(key=lambda c: c[0], reverse=True)
                 self._serialize_object(comments, path_comment_file, force=True)
-                self.redirect(self.app_uri + '/post/' + archive + '/' + pid)
+                self.redirect(rc, '/post/' + archive + '/' + pid)
             except ValueError:
-                yield self.status(400, 'I cannot understand comment_no [%s] '
-                                       'parameter' % comments_no_str)
+                yield self.status(rc, 400, 'I cannot understand comment_no [%s]'
+                                           ' parameter' % comments_no_str)
             except IOError:
                 self._logger.error("IOError occurred while adding comment",
                                    exc_info=1)
-                self.redirect(self.app_uri + '/post/' + archive + '/' + pid)
+                self.redirect(rc, '/post/' + archive + '/' + pid)
         else:
-            yield self.status(404, 'Post %s not found' % archive + '/' + pid)
+            yield self.status(rc, 404, 'Post %s not found' % archive + '/' +
+                                       pid)
 
-    def post_delete_comment(self, archive, pid, ids_str):
+    def post_delete_comment(self, rc, archive, pid, ids_str):
         entry = self.find_entry(archive, pid)
         if entry:
             fs = cgi.FieldStorage(keep_blank_values=1,
-                                  fp=self.environ['wsgi.input'],
-                                  environ=self.environ)
+                                  fp=rc.environ['wsgi.input'],
+                                  environ=rc.environ)
             password = fs.getvalue('password', '')
             m = hashlib.md5()
             m.update(password)
@@ -727,71 +738,72 @@ class Blog(object):
                         else:
                             self._logger.warn('Comment was not deleted. '
                                               'comment_no is [%s]', ids_str)
-                    self.redirect(self.app_uri + '/post/' + archive + '/' + pid)
+                    self.redirect(rc, '/post/' + archive + '/' + pid)
                 except ValueError:
-                    yield self.status(400, 'I cannot understand ids [%s] '
-                                           'parameter' % ids_str)
+                    yield self.status(rc, 400, 'I cannot understand ids [%s] '
+                                               'parameter' % ids_str)
             else:
                 self._logger.warn('Wrong password was provided in order '
                                   'to delete comment %s/%s/%s', archive, pid,
                                   ids_str)
-                self.redirect(self.app_uri + '/post/' + archive + '/' + pid)
+                self.redirect(rc, '/post/' + archive + '/' + pid)
         else:
-            yield self.status(404, 'Post %s not found' % archive + '/' + pid)
+            yield self.status(rc, 404, 'Post %s not found' % archive + '/' +
+                                       pid)
 
     def __call__(self, environ, start_response):
-        self.configure(environ, start_response)
-        path = self.environ.get('PATH_INFO', '/')
-        method = self.environ['REQUEST_METHOD'].upper()
-        if method == 'GET':
-            if not path or path == '/':
-                return self.get_list()
-            elif re.match('^/page/\d+/?$', path):
-                return self.get_list(page=int(path.split('/')[2]))
-            elif re.match('^/category/[^/]+/?$', path):
-                return self.get_list(category=
-                                     unquote_plus(path.split('/')[2]))
-            elif re.match('^/category/[^/]+/page/\d+/?$', path):
-                path_els = path.split('/')
-                return self.get_list(category=unquote_plus(path_els[2]),
+        self.configure()
+        rc = RequestContext(environ, start_response)
+        self._logger.info('env %s' % rc.environ)
+        if rc.method == 'GET':
+            if not rc.path or rc.path == '/':
+                return self.get_list(rc)
+            elif re.match('^/page/\d+/?$', rc.path):
+                return self.get_list(rc, page=int(rc.path.split('/')[2]))
+            elif re.match('^/category/[^/]+/?$', rc.path):
+                return self.get_list(rc, category=unquote_plus(
+                    rc.path.split('/')[2]))
+            elif re.match('^/category/[^/]+/page/\d+/?$', rc.path):
+                path_els = rc.path.split('/')
+                return self.get_list(rc, category=unquote_plus(path_els[2]),
                                      page=int(path_els[4]))
-            elif re.match('^/archive/\d{4}-\d{2}/?$', path):
-                return self.get_list(archive=path.split('/')[2])
-            elif re.match('^/archive/\d{4}-\d{2}/page/\d+/?$', path):
-                path_els = path.split('/')
-                return self.get_list(archive=path_els[2],
+            elif re.match('^/archive/\d{4}-\d{2}/?$', rc.path):
+                return self.get_list(rc, archive=rc.path.split('/')[2])
+            elif re.match('^/archive/\d{4}-\d{2}/page/\d+/?$', rc.path):
+                path_els = rc.path.split('/')
+                return self.get_list(rc, archive=path_els[2],
                                      page=int(path_els[4]))
-            elif re.match('^/post/\d{4}-\d{2}-\d{2}/[^/]+/?$', path):
-                path_els = path.split('/')
-                return self.get_post(archive=path_els[2],
+            elif re.match('^/post/\d{4}-\d{2}-\d{2}/[^/]+/?$', rc.path):
+                path_els = rc.path.split('/')
+                return self.get_post(rc, archive=path_els[2],
                                      pid=unquote_plus(path_els[3]))
-            elif re.match('^/post/\d{4}-\d{2}-\d{2}/[^/]+/admin/?$', path):
-                path_els = path.split('/')
-                return self.get_post(archive=path_els[2],
+            elif re.match('^/post/\d{4}-\d{2}-\d{2}/[^/]+/admin/?$', rc.path):
+                path_els = rc.path.split('/')
+                return self.get_post(rc, archive=path_els[2],
                                      pid=unquote_plus(path_els[3]),
                                      admin=True)
             elif re.match('^/delete/\d{4}-\d{2}-\d{2}/[^/]+/\d+(-\d+)*/?$',
-                          path):
-                path_els = path.split('/')
-                return self.get_delete_comment(archive=path_els[2],
+                          rc.path):
+                path_els = rc.path.split('/')
+                return self.get_delete_comment(rc, archive=path_els[2],
                                                pid=
                                                unquote_plus(path_els[3]),
                                                ids_str=path_els[4])
-            elif re.match('^/rss/?$', path):
-                return self.get_rss()
-            elif re.match('^/rss/[^/]+/?$', path):
-                return self.get_rss(path.split('/')[2])
-        elif method == 'POST':
-            if re.match('^/post/\d{4}-\d{2}-\d{2}/[^/]+/?$', path):
-                path_els = path.split('/')
-                return self.post_comment(archive=path_els[2],
+            elif re.match('^/rss/?$', rc.path):
+                return self.get_rss(rc)
+            elif re.match('^/rss/[^/]+/?$', rc.path):
+                return self.get_rss(rc.path.split('/')[2])
+        elif rc.method == 'POST':
+            if re.match('^/post/\d{4}-\d{2}-\d{2}/[^/]+/?$', rc.path):
+                path_els = rc.path.split('/')
+                return self.post_comment(rc, archive=path_els[2],
                                          pid=unquote_plus(path_els[3]))
             elif re.match('^/delete/\d{4}-\d{2}-\d{2}/[^/]+/\d+(-\d+)*/?$',
-                          path):
-                path_els = path.split('/')
-                return self.post_delete_comment(path_els[2],
+                          rc.path):
+                path_els = rc.path.split('/')
+                return self.post_delete_comment(rc, path_els[2],
                                                 unquote_plus(path_els[3]),
                                                 path_els[4])
-        return self.status(404, 'Page %s not found' % path)
+        return self.status(rc, 404, 'Page %s not found' % rc.path)
 
 application = Blog()
