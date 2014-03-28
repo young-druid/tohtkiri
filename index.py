@@ -12,6 +12,7 @@ import wsgiref.util
 import cgi
 from urllib import quote_plus, unquote_plus
 import hashlib
+import random
 
 
 class RequestContext(object):
@@ -41,7 +42,7 @@ class Blog(object):
                            ' title="${title}" href="${feed_url}" />\n'
                            '\t<title>${title}</title>\n'
                            '</head>\n'
-                           '<body>\n'
+                           '<body${body_tag}>\n'
                            '\t<header>\n'
                            '\t\t<h1>${title}</h1>\n'
                            '\t</header>\n'
@@ -102,9 +103,12 @@ class Blog(object):
                          'style="display:none;">\n'
                          '\t\t\t\t<form method="post" class="reply-form"'
                          'action="${reply_url}">\n'
-                         '\t\t\t\t<div><input name="email" id="email" '
+                         '\t\t\t\t<div><input type="text" class="cobweb" '
+                         'name="cobweb" placeholder="Please, paste ${token} '
+                         'value into this field" value=""/></div>\n'
+                         '\t\t\t\t<div><input name="email" '
                          'type="text" placeholder="Email" value=""/></div>\n'
-                         '\t\t\t\t<div><input name="name" id="name" '
+                         '\t\t\t\t<div><input name="name" '
                          'type="text" placeholder="Name" value=""/></div>\n'
                          '\t\t\t\t<div><textarea rows="4" placeholder="Comment"'
                          ' name="comment"></textarea></div>\n'
@@ -130,11 +134,14 @@ class Blog(object):
                             'id="reply-form-${id}" style="display:none;">\n'
                             '\t\t\t\t<form method="post" class="reply-form"'
                             'action="${reply_url}">\n'
+                            '\t\t\t\t<div><input type="text" class="cobweb" '
+                            'name="cobweb" placeholder="Please, paste ${token} '
+                            'value into this field" value=""/></div>\n'
                             '\t\t\t\t<input name="comment_no" type="hidden" '
                             'value="${id}"/>\n'
-                            '\t\t\t\t<div><input name="email" id="email" '
+                            '\t\t\t\t<div><input name="email" '
                             'type="text" placeholder="Email" value=""/></div>\n'
-                            '\t\t\t\t<div><input name="name" id="name" '
+                            '\t\t\t\t<div><input name="name" '
                             'type="text" placeholder="Name" value=""/></div>\n'
                             '\t\t\t\t<div><textarea rows="4" '
                             'placeholder="Comment" name="comment"></textarea>'
@@ -158,7 +165,7 @@ class Blog(object):
 
     _tpl_feed_begin = Template('<?xml version="1.0" encoding="${encoding}"?>\n'
                                '<feed xmlns="http://www.w3.org/2005/Atom">\n'
-                               '\t<title>Lipstick blog</title>\n'
+                               '\t<title>${title}</title>\n'
                                '\t<link rel="self" type="text/xml" '
                                'href="${self_url}"/>\n'
                                '\t<link type="text/html" rel="alternate" '
@@ -222,6 +229,8 @@ class Blog(object):
             self.password = m.digest()
         else:
             self.password = None
+        self._salt = conf.get('salt', ''.join(random.choice('0123456789ABCDEF')
+                                              for _ in range(16)))
 
     def _serialize_object(self, obj, file_path, force=False):
         tmp_fd, tmp_path = tempfile.mkstemp(dir=self.indices_dir)
@@ -385,7 +394,7 @@ class Blog(object):
                 comment, comments_num = None, None
         return comment
 
-    def gather_comments(self, app_uri, comments, archive, pid, admin):
+    def gather_comments(self, app_uri, comments, archive, pid, token, admin):
         reply_url = app_uri + '/post/' + archive + '/' + pid
         delete_url = app_uri + '/delete/' + archive + '/' + pid
 
@@ -406,7 +415,7 @@ class Blog(object):
                                        substitute(link=delete_url + '/' +
                                                   ids_str,
                                                   title='X') if admin else '',
-                                       comments=comments_str))
+                                       comments=comments_str, token=token))
                 _count += comments_count
             return "".join(_buf), _count
         buf, count = _gather_comments(comments, [], 0, [])
@@ -451,7 +460,7 @@ class Blog(object):
                     substitute(base=rc.app_uri, feed_url=rc.app_uri + '/rss'
                                + ('/' + category if category else ''),
                                title=cgi.escape(self.title, quote=True),
-                               encoding=self._encoding.lower())
+                               encoding=self._encoding.lower(), body_tag='')
                 yield self._tpl_entries_begin
                 entries = self.filter_entries(category, archive)
                 items_to = self.items_per_page * page
@@ -542,9 +551,13 @@ class Blog(object):
             rc.response(self._statuses[200], [('Content-Type',
                                                'text/html; charset=%s' %
                                                self._encoding)])
+            m = hashlib.sha1()
+            m.update(archive + pid + self._salt)
+            token = m.hexdigest()
             yield self._tpl_header.\
                 substitute(base=rc.app_uri, encoding=self._encoding,
                            feed_url=rc.app_uri + '/rss',
+                           body_tag=' onload="setToken(\'' + token + '\');"',
                            title=cgi.escape(self.title, quote=True))
             yield self._tpl_entries_begin
             fmt_categories = ", ".join(
@@ -566,7 +579,8 @@ class Blog(object):
                 with open(comments_path, 'rb') as f:
                     comments = cPickle.load(f)
                 comments_str, count = self.gather_comments(rc.app_uri, comments,
-                                                           archive, pid, admin)
+                                                           archive, pid, token,
+                                                           admin)
                 if count == 1:
                     comments_title = '1 comment'
                 elif count > 1:
@@ -576,7 +590,7 @@ class Blog(object):
                            time=post['date'].strftime('%Y/%m/%d'),
                            text=post_text, comments_title=comments_title,
                            comments=comments_str, reply_url=rc.app_uri +
-                           '/post/' + archive + '/' + pid)
+                           '/post/' + archive + '/' + pid, token=token)
             yield self._tpl_entries_end
             fmt_categories = "".join(
                 [self._tpl_aside_entry.substitute(link=rc.app_uri +
@@ -602,7 +616,7 @@ class Blog(object):
                                                self._encoding)])
             yield self._tpl_header.\
                 substitute(base=rc.app_uri, encoding=self._encoding,
-                           feed_url=rc.app_uri + '/rss',
+                           feed_url=rc.app_uri + '/rss', body_tag='',
                            title=cgi.escape(self.title, quote=True))
             yield self._tpl_entries_begin
             yield self.\
@@ -643,6 +657,7 @@ class Blog(object):
                 substitute(encoding=self._encoding.lower(),
                            self_url=rc.app_uri + '/rss' +
                            ('/' + category if category else ''),
+                           title=self.title,
                            author=self.author, url=rc.app_uri +
                            ('/category/' + category if category else ''),
                            id=rc.app_uri + ('/category/' +
@@ -678,30 +693,40 @@ class Blog(object):
             name = fs.getvalue('name', '')
             comment = fs.getvalue('comment', '')
             comments_no_str = fs.getvalue('comment_no')
-            try:
-                comments_no = [int(comment_no) for comment_no
-                               in comments_no_str.split("-")] if \
-                    comments_no_str else []
-                path_comment_file = os.path.\
-                    join(self.comments_dir, pid + self.file_name_sep + archive +
-                         '.comments')
-                comments = list()
-                if os.path.exists(path_comment_file):
-                    with open(path_comment_file, 'rb') as f:
-                        comments = cPickle.load(f)
-                parent_comment = self.get_comment(comments, comments_no)
-                replies = parent_comment[4] if parent_comment else comments
-                replies.append((datetime.now(), email, name, comment, []))
-                replies.sort(key=lambda c: c[0], reverse=True)
-                self._serialize_object(comments, path_comment_file, force=True)
-                self.redirect(rc, '/post/' + archive + '/' + pid)
-            except ValueError:
-                yield self.status(rc, 400, 'I cannot understand comment_no [%s]'
-                                           ' parameter' % comments_no_str)
-            except IOError:
-                self._logger.error("IOError occurred while adding comment",
-                                   exc_info=1)
-                self.redirect(rc, '/post/' + archive + '/' + pid)
+            cobweb = fs.getvalue('cobweb', '')
+            m = hashlib.sha1()
+            m.update(archive + pid + self._salt)
+            if m.hexdigest() == cobweb:
+                try:
+                    comments_no = [int(comment_no) for comment_no
+                                   in comments_no_str.split("-")] if \
+                        comments_no_str else []
+                    path_comment_file = os.path.\
+                        join(self.comments_dir, pid + self.file_name_sep +
+                             archive + '.comments')
+                    comments = list()
+                    if os.path.exists(path_comment_file):
+                        with open(path_comment_file, 'rb') as f:
+                            comments = cPickle.load(f)
+                    parent_comment = self.get_comment(comments, comments_no)
+                    replies = parent_comment[4] if parent_comment else comments
+                    replies.append((datetime.now(), email, name, comment, []))
+                    replies.sort(key=lambda c: c[0], reverse=True)
+                    self._serialize_object(comments, path_comment_file,
+                                           force=True)
+                    self.redirect(rc, '/post/' + archive + '/' + pid)
+                except ValueError:
+                    yield self.status(rc, 401, 'I cannot understand comment_no '
+                                               '[%s] parameter' %
+                                               comments_no_str)
+                except IOError:
+                    self._logger.error("IOError occurred while adding comment",
+                                       exc_info=1)
+                    self.redirect(rc, '/post/' + archive + '/' + pid)
+            else:
+                yield self.status(rc, 400, 'Token for preventing spam was not '
+                                           'valid during comment submission. '
+                                           'Please, try again')
         else:
             yield self.status(rc, 404, 'Post %s not found' % archive + '/' +
                                        pid)

@@ -108,6 +108,10 @@ main .comments header {
   text-align: center;
 }
 
+.comments .reply-form div:first-child {
+    display: none;
+}
+
 .comments .reply-form input, .comments .reply-form textarea {
   display: block;
   width: 100%;

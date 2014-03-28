@@ -13,3 +13,11 @@ function toggleReplyForm(elId){
     el.style.display = 'none';
   }
 }
+
+function setToken(token){
+  var els = document.getElementsByClassName('cobweb')
+  for (var i = 0; i < els.length; i++){
+    var inputEl = els[i];
+    inputEl.value = token;
+  }
+}
