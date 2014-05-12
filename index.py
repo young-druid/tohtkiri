@@ -217,6 +217,10 @@ class Blog(object):
             self.items_per_feed = int(conf.get('items_per_feed', 7))
         except ValueError:
             self.items_per_feed = 7
+        try:
+            self.comments_nesting = int(conf.get('comments_nesting', 7))
+        except ValueError:
+            self.items_per_feed = 7
         self.index = self._try_main_index(os.path.join(self.indices_dir,
                                                        'main.index'))
         self.author = conf.get('author', 'anonymous')
@@ -382,16 +386,19 @@ class Blog(object):
         except ValueError:
             return None
 
-    @staticmethod
-    def get_comment(comments, comments_num):
+    def get_comment(self, comments, comments_num):
         comment = None
+        level = 0
         while comments_num:
             index = comments_num[0]
+            if level == self.comments_nesting:
+                return comment
             if index < len(comments):
                 comment = comments[index]
                 comments, comments_num = comment[4], comments_num[1:]
             else:
                 comment, comments_num = None, None
+            level += 1
         return comment
 
     def gather_comments(self, app_uri, comments, archive, pid, token, admin):
