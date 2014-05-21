@@ -95,7 +95,7 @@ class Blog(object):
                          '\t\t\t\t<p>${text}</p>\n'
                          '\t\t\t\t<footer>\n'
                          '\t\t\t\t<div>posted in ${categories}</div>\n'
-                         '\t\t\t\t<div class="comments">\n'
+                         '\t\t\t\t<div class="comments" id="comments">\n'
                          '\t\t\t\t<header><h3>${comments_title}</h3>'
                          '<a onclick="toggleReplyForm(\'reply-form\');'
                          'return false;" href="#comments">Reply</a></header>\n'
@@ -423,7 +423,7 @@ class Blog(object):
                                                   ids_str,
                                                   title='X') if admin else '',
                                        comments=comments_str, token=token))
-                _count += comments_count
+                _count += comments_count + 1
             return "".join(_buf), _count
         buf, count = _gather_comments(comments, [], 0, [])
         return "".join(buf), count

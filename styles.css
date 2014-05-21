@@ -153,6 +153,10 @@ main .comment_body {
   margin-bottom: 1em;
 }
 
+main .comment_body time {
+  margin: 0 1em 0 1em;
+}
+
 main .reply_comments {
   margin-left: 1.3em;
 }
