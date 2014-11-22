@@ -322,26 +322,26 @@ class Blog(object):
                                self.build_file_name(entry))) as f:
             preview, full = False, False
             for line in f:
-                if line.startswith('categories:') and not 'categories' in post:
+                if line.startswith('categories:') and 'categories' not in post:
                     post['categories'] = [category.strip() for category in
                                           line.lstrip('categories:').split(",")]
                     preview, full = False, False
-                elif line.startswith('title:') and not 'title' in post:
+                elif line.startswith('title:') and 'title' not in post:
                     post['title'] = line.lstrip('title:').strip()
                     preview, full = False, False
                 elif line.startswith('preview:') and not preview \
-                        and not 'preview' in post:
+                        and 'preview' not in post:
                     preview, full = True, False
                     post['preview'] = line.lstrip('preview:').lstrip()
                 elif line.startswith('full:') and not full \
-                        and not 'full' in post:
+                        and 'full' not in post:
                     preview, full = False, True
                     post['full'] = line.lstrip('full:').lstrip()
                 elif preview:
                     post['preview'] += line
                 elif full:
                     post['full'] += line
-        if not 'categories' in post:
+        if 'categories' not in post:
             post['categories'] = []
         return post
 
@@ -455,9 +455,9 @@ class Blog(object):
 
     def get_list(self, rc, category=None, archive=None, page=1):
         if page > 0:
-            if category and not category in self.categories:
+            if category and category not in self.categories:
                 yield self.status(rc, 404, 'Category %s not found' % category)
-            elif archive and not archive in self.archive:
+            elif archive and archive not in self.archive:
                 yield self.status(rc, 404, 'Archive %s not found' % archive)
             else:
                 rc.response(self._statuses[200], [('Content-Type',
@@ -482,11 +482,9 @@ class Blog(object):
                     if 'preview' in post:
                         post_text = post['preview']
                         if 'full' in post:
-                            post_text += self.\
-                                _tpl_link.substitute(link=rc.app_uri +
-                                                     '/post/' + date_for_link +
-                                                     '/' + post['id'], title=
-                                                     'View full post &rarr;')
+                            post_text += self._tpl_link.substitute(
+                                link=rc.app_uri + '/post/' + date_for_link +
+                                '/' + post['id'], title='View full post &rarr;')
                     elif 'full' in post:
                         post_text = post['full']
                     else:
@@ -648,7 +646,7 @@ class Blog(object):
                                        pid)
 
     def get_rss(self, rc, category=None):
-        if category and not category in self.categories:
+        if category and category not in self.categories:
             yield self.status(rc, 404, 'Category %s not found' % category)
         else:
             rc.response(self._statuses[200], [('Content-Type',
@@ -817,8 +815,7 @@ class Blog(object):
                           rc.path):
                 path_els = rc.path.split('/')
                 return self.get_delete_comment(rc, archive=path_els[2],
-                                               pid=
-                                               unquote_plus(path_els[3]),
+                                               pid=unquote_plus(path_els[3]),
                                                ids_str=path_els[4])
             elif re.match('^/rss/?$', rc.path):
                 return self.get_rss(rc)
