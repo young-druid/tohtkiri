@@ -220,7 +220,7 @@ class Blog(object):
         try:
             self.comments_nesting = int(conf.get('comments_nesting', 7))
         except ValueError:
-            self.items_per_feed = 7
+            self.comments_nesting = 7
         self.index = self._try_main_index(os.path.join(self.indices_dir,
                                                        'main.index'))
         self.author = conf.get('author', 'anonymous')
